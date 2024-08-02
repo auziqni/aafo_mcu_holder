@@ -1,8 +1,8 @@
+//---------------------------------------------library pemograman/header files
+#include <ESP32Servo.h>
 #include <I2Cdev.h>
 #include <MPU6050_6Axis_MotionApps20.h>
 #include <Wire.h>
-#include <ESP32Servo.h>
-#include <PID_v1_bc.h> // Include the PID library
 // teknisee
 //-----------------------------------------------------------------------------------------------
 #include <WiFi.h>          // import wifi library
@@ -21,10 +21,12 @@ const char *password = "SIMIONE19";
 #define FIREBASE_AUTH "lWOv4jbAHmdJHW3Hi6bvqenkFnOVos0psAeNUCR2"
 
 // main dynamcic global variable
-int lastmillis;
+int timersession, timersecond;
 String jsonReqPayload = "";
 float pitch;
 int fsr1value, fsr2value;
+bool sessionRead = false;
+int timessessionRead = 5, bacaSession = 0;
 
 // global varialbe firebase
 FirebaseData fbdo;
@@ -33,58 +35,34 @@ FirebaseConfig config;
 
 //-----------------------------------------------------------------------------------------------
 
-const int fsrPin1 = 35;
-const int fsrPin2 = 32;
+//-------------------------------------------- deklarasi servo dan pin
+Servo myServo;
+#define SERVO_PIN 2     // definisi pin untuk servo
+#define INTERRUPT_PIN 5 // defini pin untuk interrupt MPU6050
+#define FSR_1_PIN 35    // pin FSR 1
+#define FSR_2_PIN 32    // pin FSR 2
 
-double dt, last_time;
-double integral, previous, output = 0;
-double kp, ki, kd;
-double setpoint = 75.00;
-bool sessionRead = false;
-int timessessionRead = 5, bacaSession = 0;
+//-------------------------------------------- Array Posisi dan Durasi
+int poss[] = {0, -5, 0, 5, 0, 20, 10, 0, 0};                    // array yang menyimpan sudut target untuk servo
+int duration[] = {150, 150, 150, 350, 250, 150, 150, 150, 150}; // array yang menyimpan durasi perpindahan dari satu sudut ke sudut berikutnya
 
-MPU6050 mpu;
-// MPU6050 mpu(0x69);
-Servo rightFootServo;
+//-------------------------------------------- MPU6050 offsets
+int mpu_offset[6] = {-2778, -838, -1234, 789, 93, -3}; // array yang menyimpan nilai offset untuk mpu
 
-bool blinkState = false;
+//--------------------------------------------MPU6050 variables
+MPU6050 mpu; // membuat objek MPU
 
-// MPU control
-bool dmpReady = false;
-uint8_t mpuIntStatus;
-uint8_t devStatus;
-uint16_t packetSize;
-uint16_t fifoCount;
-uint8_t fifoBuffer[64];
+bool dmpReady = false;  // menyimpan status kesiapan DMP
+uint8_t mpuIntStatus;   // menyimpan status interrupt MPU6050
+uint8_t devStatus;      // menyimpan status inisialisasi
+uint16_t packetSize;    // menyimpan ukuran paket FIFO DMP
+uint16_t fifoCount;     // menyimpan jumlah data dalam FIFO
+uint8_t fifoBuffer[64]; // Buffer untuk menyimpan data FIFO
 
-// orientation
-Quaternion q;
-VectorInt16 aa;
-VectorInt16 aaReal;
-VectorInt16 aaWorld;
-VectorFloat gravity;
-float ypr[3];
-
-#define INTERRUPT_PIN 5
-int i = 0;
-int mpu_offset[6] = {-2778, -838, -1234, 789, 93, -3};
-int initialAngle = 0; // sudut awal kaki kanan (netral)
-int minAngle = -70;   // sudut minimum gerakan kaki kanan
-int maxAngle = 90;    // sudut maksimum gerakan kaki kanan
-int step = 10;        // increment sudut per langkah
-
-float yaw, roll, servoAngle;
-
-volatile bool mpuInterrupt = false;
-
-// PID control variables
-double Setpoint, Input, Output;
-double Kp = 1.0, Ki = 0.1, Kd = 0.01; // PID constants
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
-double titikawalmotor = 00.0;
-double titikawalmpu6050 = 00.0;
-
-int mpuConected = 0;
+Quaternion q;                       // menyimpan data quartenion dari MPU
+VectorFloat gravity;                // menyimpan vektor gravitasi dari MPU
+volatile bool mpuInterrupt = false; // Flag untuk interrupt MPU
+float ypr[3];                       // menyimpan nilai yaw, pitch, dan roll
 
 // teknisee function
 //-----------------------------------------------------------------------------------------------
@@ -260,189 +238,169 @@ void send2psql()
 // teknisee funtion end
 //-----------------------------------------------------------------------------------------------
 
-void dmpDataReady()
+//------------------------------------------ fungsi interrupt
+void dmpDataReady() // fungsi interrupt yang dipanggil saat data DMP siap
 {
-  mpuInterrupt = true;
+  mpuInterrupt = true; // mengatur variabel menjadi true
 }
 
-void print_yaw_pitch_roll()
-{
-  // Serial.print("data : ");
-  // Serial.print("yaw : ");
-  // Serial.print(yaw);
-  Serial.print("kode : ");
-  Serial.print(norekam);
-  Serial.print("\n");
-
-  if (bacaSession > 0)
-  {
-    Serial.print("sesion dimulai, sisa : ");
-    Serial.print(bacaSession);
-  }
-  else
-  {
-    Serial.print("sesion selesai, sisa : ");
-    Serial.print(bacaSession);
-  }
-
-  Serial.print("\tpitch : ");
-  Serial.print(pitch);
-  // Serial.print("\troll : ");
-  // Serial.print(roll);
-  Serial.print("\tFSR 1 Value: ");
-  Serial.print(fsr1value);
-  Serial.print("\tFSR 2 Value: ");
-  Serial.println(fsr2value);
-}
-
-double pid(double error)
-{
-  double proportional = error;
-  integral += error * dt;
-  double derivative = (error - previous) / dt;
-  previous = error;
-  double output = (Kp * proportional) + (Ki * integral) + (Kd * derivative);
-  return output;
-}
-
+// ----------------------------------------- koneksi MPU6050
 void MPU_Connect()
 {
-  // MPU initialization
-  Serial.println(F("Initializing I2C devices..."));
-  mpu.initialize();
-  Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
+  Serial.println(F("Initializing I2C devices..."));                                                           // menampilkan pesan di serial monitor bahwa perangkat i2c sedang diinisialisasi
+  mpu.initialize();                                                                                           // menginisialisasi MPU6050
+  Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed")); // menguji koneksi ke MPU dan menampilkan pesan di serial monitor apakah koneksi berhasil atau gagal
 
-  Serial.println(F("Initializing DMP..."));
-  devStatus = mpu.dmpInitialize();
+  Serial.println(F("Initializing DMP...")); // menampilkan pesan di serial monitoring bahwa DMP sedang diinisialisasi
+  devStatus = mpu.dmpInitialize();          // menginisialisasi DMP dan menyimpan status inisialisasi dalam 'devStatus'
 
-  mpu.setXAccelOffset(mpu_offset[0]);
-  mpu.setYAccelOffset(mpu_offset[1]);
-  mpu.setZAccelOffset(mpu_offset[2]);
-  mpu.setXGyroOffset(mpu_offset[3]);
-  mpu.setYGyroOffset(mpu_offset[4]);
-  mpu.setZGyroOffset(mpu_offset[5]);
+  mpu.setXAccelOffset(mpu_offset[0]); // menetapkan offset akselerometer sumbu X dari array 'mpu_offset'
+  mpu.setYAccelOffset(mpu_offset[1]); // menetapkan offset akselerometer sumbu Y dari array 'mpu_offset'
+  mpu.setZAccelOffset(mpu_offset[2]); // menetapkan offset akselerometer sumbu Z dari array 'mpu_offset'
+  mpu.setXGyroOffset(mpu_offset[3]);  // menetapkan offset gyroscope sumbu X dari array 'mpu_offset'
+  mpu.setYGyroOffset(mpu_offset[4]);  // menetapkan offset gyroscope sumbu Y dari array 'mpu_offset'
+  mpu.setZGyroOffset(mpu_offset[5]);  // menetapkan offset gyroscope sumbu Z dari array 'mpu_offset'
 
-  if (devStatus == 0)
+  if (devStatus == 0) // memeriksa apakah inisialisasi DMP berhasil
   {
-    mpu.CalibrateAccel(10);
-    mpu.CalibrateGyro(10);
-    mpu.PrintActiveOffsets();
+    mpu.CalibrateAccel(10);   // mengkalibrasi akselerometer dengan 10 sampel
+    mpu.CalibrateGyro(10);    // mengkalibrasi gyroscope dengan 10 sampel
+    mpu.PrintActiveOffsets(); // mencetak nilai offset aktif ke serial monitor
 
-    Serial.println(F("Enabling DMP..."));
-    mpu.setDMPEnabled(true);
+    Serial.println(F("Enabling DMP...")); // menampilkan pesan di serial monitor bahwa DMP sedang diaktifkan
+    mpu.setDMPEnabled(true);              // mengaktifkan DMP
 
-    Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
-    Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
-    Serial.println(F(")..."));
-    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
-    mpuIntStatus = mpu.getIntStatus();
+    Serial.print(F("Enabling interrupt detection (Arduino external interrupt ")); // menampilkan pesan di serial monitor bahwa deteksi interrupt sedang diaktifkan
+    Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));                           // menampilkan nomor interrupt yang digunakan oleh INTERRUPT_PIN di serial monitor.
+    Serial.println(F(")..."));                                                    // Menampilkan penutupan pesan sebelumnya di serial monitor.
+    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);  // Mengatur interrupt pada INTERRUPT_PIN sehingga fungsi dmpDataReady dipanggil saat sinyal naik (RISING).
+    mpuIntStatus = mpu.getIntStatus();                                            // Mendapatkan status interrupt dari MPU6050.
 
-    Serial.println(F("DMP ready! Waiting for first interrupt..."));
-    dmpReady = true;
+    Serial.println(F("DMP ready! Waiting for first interrupt...")); // Menampilkan pesan bahwa DMP siap dan menunggu interrupt pertama di serial monitor.
+    dmpReady = true;                                                // Mengatur status DMP menjadi siap.
 
-    packetSize = mpu.dmpGetFIFOPacketSize();
+    packetSize = mpu.dmpGetFIFOPacketSize(); // Mendapatkan ukuran paket data dari FIFO buffer.
   }
-  else
+  else // jika inisialisasi DMP gagal
   {
-    Serial.print(F("DMP Initialization failed (code "));
-    Serial.print(devStatus);
-    Serial.println(F(")"));
+    Serial.print(F("DMP Initialization failed (code ")); // Menampilkan pesan bahwa inisialisasi DMP gagal di serial monitor.
+    Serial.print(devStatus);                             // Menampilkan kode status kesalahan inisialisasi.
+    Serial.println(F(")"));                              // Menutup pesan status kesalahan.
   }
 }
 
+//-----------------------------------------durasi servo bergerak dari satu posisi ke posisi lain
+int getDuration(int duration) // Fungsi untuk mendapatkan durasi perpindahan servo.
+{
+  if (duration < 3) // Jika durasi kurang dari 3, maka:
+  {
+    return 1; // Kembalikan 1.
+  }
+  int increment = 3;                //  Inisialisasi increment dengan nilai 3.
+  while (duration % increment != 0) // Selama durasi tidak habis dibagi increment:
+  {
+    increment += 1; // tambahkan increment dengan 1
+  }
+  return increment; // kembalikan nilai increment
+}
+
+void printData(float servoAngle) // mencetak nilai
+{
+  Serial.print("fsr1value = ");
+  Serial.print(fsr1value);
+  Serial.print("\tfsr2value = ");
+  Serial.print(fsr2value);
+  Serial.print("\tpitch = ");
+  Serial.print(pitch);
+  Serial.print("\tServoAngle = ");
+  Serial.println(90 + (int)servoAngle);
+}
+
+//----------------------------------------------- fungsi setup
 void setup()
 {
-  Wire.begin();
-  Wire.setClock(400000);
-  initWifi(); // it must connect to wifi, unless it will not continue to the next line
+  Wire.begin();          // inisialisasi komunikasi I2C
+  Wire.setClock(400000); // Mengatur kecepatan komunikasi i2c menjadi 400 kHz
+  initWifi();            // it must connect to wifi, unless it will not continue to the next line
   initFirebase();
 
-  rightFootServo.attach(2);
-  rightFootServo.write(0);
+  Serial.begin(9600); // memulai komunikasi serial dengan kecepatan 9600 bps
 
-  Serial.begin(115200);
+  //------------------------------------------------Pasangkan servo ke pin GPIO
+  myServo.attach(SERVO_PIN); // menghubungkan servo ke pin 2
+  myServo.write(90);         // mengatur posisi awal servo ke 90° (posisi tengah)
 
-  // PID setup
-  Setpoint = initialAngle; // Desired angle
-  myPID.SetMode(AUTOMATIC);
-  myPID.SetSampleTime(step);
-  myPID.SetOutputLimits(minAngle, maxAngle); // Limit the output to servo angle range
-
-  // MPU initialization
-  while (dmpReady == false)
+  //------------------------------------------------MPU initialization
+  while (!dmpReady) // Loop ini terus berjalan sampai dmpReady diatur menjadi true.
   {
-    MPU_Connect();
+    MPU_Connect(); // inisialisasi mpu
   }
-  mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16); // mengubah kesensitifitas gyro dari 2G ke 16G
 }
 
 void loop()
 {
-  fsr1value = analogRead(fsrPin1);
-  fsr2value = analogRead(fsrPin2);
-
-  if (!dmpReady)
-    return;
-
-  if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer))
+  //----------------------------------------- set the initial servo angle
+  float servoAngle = poss[0];                              // Mengatur sudut awal servo dengan nilai awal dari array poss.
+  for (int i = 0; i < sizeof(poss) / sizeof(poss[0]); i++) // loop akan berjalan dari i = 0 hingga i = 8 (9 iterasi), mengakses setiap elemen dalam array poss.
   {
-    mpu.dmpGetQuaternion(&q, fifoBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
-    mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+    // ------------------------------------- set the values for servo angle and position
+    int increment = getDuration(duration[i]);                                             // Menghitung jumlah langkah yang dibutuhkan untuk mencapai posisi berikutnya, menggunakan fungsi getDuration(duration[i]).
+    int nextPosition = (i != sizeof(poss) / sizeof(poss[0]) - 1) ? poss[i + 1] : poss[0]; // menentukan posisi berikutnya
+    float anggelAdd = (float)(nextPosition - poss[i]) / increment;                        // Menghitung selisih antara posisi berikutnya dan posisi saat ini
 
-    yaw = (ypr[0] * 180 / M_PI);
-    pitch = (ypr[1] * 180 / M_PI);
-    roll = (ypr[2] * 180 / M_PI);
-
-    print_yaw_pitch_roll();
-    Input = pitch;   // Set the input to the current pitch
-    myPID.Compute(); // Perform the PID computation
-
-    //        int i = 0;
-    //        while(true){
-    //          i = i + 5;
-    //           rightFootServo.write(i);
-    //           delay(500);
-    //        }
-    //        Serial.println(abs(Output));
-
-    servoAngle = titikawalmotor + (Output + titikawalmpu6050);
-    //        rightFootServo.write(abs(Output));
-    //        Serial.print("\tMotor Output: ");
-    // Serial.println(abs(Output));
-    //         Controlling the servo based on the PID output = PWM
-    if (servoAngle > -24 && servoAngle < 38)
+    //-------------------------------------- move the servo to the next position
+    for (int j = 0; j < duration[i]; j += duration[i] / increment) // servo bergerak secara bertahap dari satu posisi ke posisi berikutnya dalam durasi yang ditentukan.
     {
-      rightFootServo.write(servoAngle);
-      // Serial.print("Servo Angle: ");
-      // Serial.println(servoAngle);
+      // --------------------------------- Read the FSR values
+      fsr1value = analogRead(FSR_1_PIN);
+      fsr2value = analogRead(FSR_2_PIN);
+
+      // --------------------------------- Read the MPU6050 pitch values
+      if (!dmpReady)
+        return;
+      if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer))
+      {
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+
+        // -------------------------------- pitch from the MPU6050
+        pitch = (ypr[1] * 180 / M_PI); // Mengkonversi nilai pitch dari radian ke derajat.
+      }
+
+      // ----------------------------------- mengatur sudut servo
+      servoAngle += anggelAdd; // Menambahkan nilai anggelAdd ke servoAngle. anggelAdd adalah jumlah kecil perubahan sudut yang dihitung untuk setiap langkah.
+
+      // ------------------------------------ menulis sudut ke servo
+      myServo.write(90 + (int)servoAngle); // Menulis sudut baru ke servo. Sudut dasar adalah 90 derajat, dan servoAngle ditambahkan untuk menentukan sudut akhir.
+      delay(300);
+
+      if (millis() - timersecond > 1000)
+      {
+        timersecond = millis();
+        writeFirebase();
+      }
+
+      if (millis() - timersession > 10000)
+      {
+        timersession = millis();
+        // call function
+        readFirebase();
+        data2json();
+
+        if (bacaSession > 0)
+        {
+          send2psql();
+          bacaSession--;
+        }
+      }
     }
-    else if (servoAngle < -24)
-    {
-      rightFootServo.write(-24);
-    }
-    else
-    {
-      rightFootServo.write(39);
-    }
+
+    printData(servoAngle); // mencetak data sensor dan sudut servo
+
+    // Serial.print("servoAngle = ");
+    // Serial.println(90 + (int)servoAngle);
+
+    delay(300);
   }
-
-  // teknisee loop
-  //-----------------------------------------------------------------------------------------------
-  data2json();
-  writeFirebase();
-  if (millis() - lastmillis > 10000)
-  {
-    lastmillis = millis();
-    // call function
-    readFirebase();
-    if (bacaSession > 0)
-    {
-      send2psql();
-      bacaSession--;
-    }
-  }
-  // teknisee loop end
-  //-----------------------------------------------------------------------------------------------
-  delay(1000);
 }
