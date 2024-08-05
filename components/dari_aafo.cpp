@@ -1,3 +1,4 @@
+#include <Arduino.h>
 //---------------------------------------------library pemograman/header files
 #include <ESP32Servo.h>
 #include <I2Cdev.h>
@@ -12,8 +13,8 @@ Servo myServo;
 #define FSR_2_PIN 32    // pin FSR 2
 
 //-------------------------------------------- Array Posisi dan Durasi
-int poss[] = {0, -5, 0, 5, 0, 20, 10, 0, 0};                    // array yang menyimpan sudut target untuk servo
-int duration[] = {150, 150, 150, 350, 250, 150, 150, 150, 150}; // array yang menyimpan durasi perpindahan dari satu sudut ke sudut berikutnya
+int poss[9] = {0, -5, 0, 5, 0, 20, 10, 0, 0};                    // array yang menyimpan sudut target untuk servo
+int duration[9] = {150, 150, 150, 350, 250, 150, 150, 150, 150}; // array yang menyimpan durasi perpindahan dari satu sudut ke sudut berikutnya
 
 //-------------------------------------------- MPU6050 offsets
 int mpu_offset[6] = {-2778, -838, -1234, 789, 93, -3}; // array yang menyimpan nilai offset untuk mpu

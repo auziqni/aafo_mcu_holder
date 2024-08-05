@@ -197,7 +197,7 @@ void data2json()
   D2W["beratBelakang"] = fsr2value;
 
   serializeJson(D2W, jsonReqPayload);
-  // Serial.println(jsonReqPayload);
+  Serial.println(jsonReqPayload);
 }
 
 void send2psql()
@@ -307,6 +307,8 @@ int getDuration(int duration) // Fungsi untuk mendapatkan durasi perpindahan ser
 void printData(float servoAngle) // mencetak nilai
 {
   Serial.print("fsr1value = ");
+  Serial.print(norekam);
+  Serial.print("\tfsr1value = ");
   Serial.print(fsr1value);
   Serial.print("\tfsr2value = ");
   Serial.print(fsr2value);
@@ -324,7 +326,7 @@ void setup()
   initWifi();            // it must connect to wifi, unless it will not continue to the next line
   initFirebase();
 
-  Serial.begin(9600); // memulai komunikasi serial dengan kecepatan 9600 bps
+  Serial.begin(115200); // memulai komunikasi serial dengan kecepatan 9600 bps
 
   //------------------------------------------------Pasangkan servo ke pin GPIO
   myServo.attach(SERVO_PIN); // menghubungkan servo ke pin 2
@@ -386,10 +388,10 @@ void loop()
         timersession = millis();
         // call function
         readFirebase();
-        data2json();
 
         if (bacaSession > 0)
         {
+          data2json();
           send2psql();
           bacaSession--;
         }

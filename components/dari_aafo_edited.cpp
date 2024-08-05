@@ -64,10 +64,6 @@ VectorFloat gravity;                // menyimpan vektor gravitasi dari MPU
 volatile bool mpuInterrupt = false; // Flag untuk interrupt MPU
 float ypr[3];                       // menyimpan nilai yaw, pitch, dan roll
 
-float pitch; // menyimpan nilai pitch
-
-int fsr1value, fsr2value; // menyimpan nilai dari sensor FSR
-
 // teknisee function
 //-----------------------------------------------------------------------------------------------
 
