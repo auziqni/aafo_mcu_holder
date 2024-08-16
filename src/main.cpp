@@ -130,9 +130,9 @@ void monitorSerial()
 
 void randomizeMockData()
 {
-  sudut = random(0, 180);
-  tekananDepan = random(0, 1023);
-  tekananBelakang = random(0, 1023);
+  sudut = random(-450, 900) / 10.0;
+  tekananDepan = random(100, 4200);
+  tekananBelakang = random(100, 4200);
 }
 
 // fungsi utama
